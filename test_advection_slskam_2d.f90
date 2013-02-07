@@ -78,9 +78,9 @@ contains
     tmp_method(3) = 5  ! PPM, selective limiting using FCT
     tmp_method(4) = 37 ! PPM, selective limiting using PMOD
     tmp_method(5) = 38 ! PPM, selective and positivity limiting using PMOD
-    tmp_method(6) = 99 ! PPM/DG Hybrid, no limiting, ADDED BY DEVIN
+    tmp_method(6) = 99 ! PPM/DG Hybrid, no limiting
 
-    do nn = 1,n2
+    do nn = 6,n2
        imethod = tmp_method(nn)
 
       
@@ -233,7 +233,7 @@ contains
        nx = nx0*nscale**(p-1)
        ny = ny0*nscale**(p-1)
                                    ! Dev: When using DG, each element in x-direction will have nnodes+1 DG-nodes (overlap at edges).
-       num_elem = (nx)/(nnodes+1)  ! In order for C (used in exchanging between DG/PPM to be square (for inverse), nx must be 
+       num_elem = (nx)/(nnodes+1)  ! For the matrix C (used in exchanging between DG/PPM to be square (for inverse), nx must be 
        elemdx = 1.d0/num_elem      ! a multiple of nnodes+1 (say, if nnodes=4, nx = 20)
 
        allocate(q(1-npad:nx+npad,1-npad:ny+npad), &
@@ -291,6 +291,7 @@ contains
         
 
         ! Transfer nodes to physical domain
+		! Note: The coordinates of the edges of each element are repeated
          do i = 1,num_elem
             DGxgrid(1+(nnodes+1)*(i-1):(nnodes+1)*i) = ecent(i)+0.5d0*elemdx*DGnodes(0:nnodes)
          end do
@@ -453,11 +454,11 @@ contains
                   time,1,cdf_out,p)
           end if
 
-!!$          write(*,*) 'rho min, max = ', MINVAL(rho), MAXVAL(rho)
-!!$          write(*,*) 'rhoprime min, max = ', MINVAL(rhoprime), MAXVAL(rhoprime)
-!!$          write(*,*) 'rhoq min, max = ', MINVAL(rhoq), MAXVAL(rhoq)
-!!$          write(*,*) 'q min, max = ', MINVAL(q(1:nx,1:ny)), MAXVAL(q(1:nx,1:ny))
-!!$          write(*,*)
+          write(*,*) 'rho min, max = ', MINVAL(rho), MAXVAL(rho)
+          write(*,*) 'rhoprime min, max = ', MINVAL(rhoprime), MAXVAL(rhoprime)
+          write(*,*) 'rhoq min, max = ', MINVAL(rhoq), MAXVAL(rhoq)
+          write(*,*) 'q min, max = ', MINVAL(q(1:nx,1:ny)), MAXVAL(q(1:nx,1:ny))
+          write(*,*)
 
 !!$          if(n.eq.3)     stop ' in back_traj'
 

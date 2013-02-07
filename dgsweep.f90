@@ -76,20 +76,20 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
 
     DO j = 1, num_elem
        DO k = 0, nnodes
-           A1(k,j) = A(k,j) + dt*rk3rhs(A,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts)  
-           B1(k,j) = B(k,j) + dt*rk3rhs(B,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts)
+           A1(k,j) = A(k,j) + dt*rk3rhs(A,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts)  
+           B1(k,j) = B(k,j) + dt*rk3rhs(B,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts)
        END DO
     END DO
 	! -- Enforce periodicity
     A1(:,0) = A1(:,num_elem)
 	A1(:,num_elem+1) = A1(:,1)
-	B1(:,0) = B1(:,num_elem)
+	B1(:,0) = B1(:,num_elem) !Ain,utild,k,j,nnodes,num_elem,DGDmat,elemdx,nodes,wghts
 	B1(:,num_elem+1) = B1(:,1)
 
     DO j = 1, num_elem
       DO k = 0, nnodes
-           A2(k,j) = (3D0/4D0)*A(k,j) + (1D0/4D0)*(A1(k,j) + dt*rk3rhs(A1,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts))
-           B2(k,j) = (3D0/4D0)*B(k,j) + (1D0/4D0)*(B1(k,j) + dt*rk3rhs(B1,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts))
+           A2(k,j) = (3D0/4D0)*A(k,j) + (1D0/4D0)*(A1(k,j) + dt*rk3rhs(A1,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts))
+           B2(k,j) = (3D0/4D0)*B(k,j) + (1D0/4D0)*(B1(k,j) + dt*rk3rhs(B1,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts))
       END DO
     END DO
 	! -- Enforce periodicity
@@ -100,29 +100,28 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
 
    DO j = 1,num_elem
        DO k = 0, nnodes
-           A(k,j) = (1D0/3D0)*A(k,j) + (2D0/3D0)*(A2(k,j) + dt*rk3rhs(A2,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts))
-           B(k,j) = (1D0/3D0)*B(k,j) + (2D0/3D0)*(B2(k,j) + dt*rk3rhs(B2,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts))
+           A(k,j) = (1D0/3D0)*A(k,j) + (2D0/3D0)*(A2(k,j) + dt*rk3rhs(A2,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts))
+           B(k,j) = (1D0/3D0)*B(k,j) + (2D0/3D0)*(B2(k,j) + dt*rk3rhs(B2,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts))
        END DO
    END DO
 
     ! After time stepping is complete, use Cmat to re-average the series expansion to get back to cell-averaged values
     ! on the evenly spaced grid to send back for PPM
+    HOLDER1 = 0D0
+    HOLDER2 = 0D0
     DO j = 1,num_elem
-        DO i=0,nnodes
-            HOLDER1 = 0D0
-            HOLDER2 = 0D0
-    
+        DO i=0,nnodes    
             DO k=0,nnodes
                 HOLDER1(k) = DGCmat(i,k)*A(k,j)
                 HOLDER2(k) = DGCmat(i,k)*B(k,j)
             END DO
-
             rqBAR(i,j) = SUM(HOLDER1)
             rpBAR(i,j) = SUM(HOLDER2)
         END DO
     END DO
     
     ! Reform original rp and rq vectors to send back
+	! -- Note: There are 2 ghost cells (one at each end) that we dont update
     DO j=1,num_elem
         rhoq(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = rqBAR(:,j)
         rhoprime(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = rpBAR(:,j)
@@ -131,13 +130,13 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
     
     CONTAINS
 
-	REAL(KIND=DOUBLE) FUNCTION Gflux(A,jleft,jright,u,nnodes,nelems,nodes)
+	REAL(KIND=DOUBLE) FUNCTION Gflux(A,jleft,jright,u,nnodes,nelems)
 		IMPLICIT NONE
 		! -- Inputs
 		INTEGER, INTENT(IN) :: nnodes,nelems,jleft,jright
 		REAL(KIND=DOUBLE), DIMENSION(0:nnodes,0:nelems+1), INTENT(IN) :: A,u
-		REAL(KIND=DOUBLE), DIMENSION(0:nnodes), INTENT(IN) :: nodes
 
+		! -- Note that it is assumed that u(nnodes,jleft) = u(0,jright)
 		IF(u(nnodes,jleft)>0D0) THEN
 			Gflux = u(nnodes,jleft)*A(nnodes,jleft)
 		ELSE
@@ -145,40 +144,34 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
 		END IF
 	END FUNCTION Gflux
 
-    REAL(KIND = DOUBLE) FUNCTION rk3rhs(Ain,k,j,DGDmat,utild,num_elem,elemdx,nnodes,wghts)
-	! -- Work in progress
+    REAL(KIND = DOUBLE) FUNCTION rk3rhs(Ain,utild,k,j,nnodes,num_elem,DGDmat,elemdx,wghts)
         IMPLICIT NONE
 
         INTEGER, INTENT(IN) :: k,j,num_elem, nnodes
-        REAL(KIND = DOUBLE), DIMENSION(0:nnodes,1:num_elem), INTENT(IN) :: Ain,utild
+        REAL(KIND = DOUBLE), DIMENSION(0:nnodes,0:num_elem+1), INTENT(IN) :: Ain,utild
         REAL(KIND = DOUBLE), DIMENSION(0:nnodes,0:nnodes), INTENT(IN) :: DGDmat
         REAL(KIND = DOUBLE), DIMENSION(0:nnodes), INTENT(IN) ::wghts
         REAL(KIND = DOUBLE), INTENT(IN) :: elemdx
-            
+
+		! -- Local variables            
         INTEGER :: n
-        
-        rk3rhs = 0D0
+		REAL(KIND=DOUBLE), DIMENSION(0:nnodes) :: HOLDER
+
+        HOLDER = 0D0
         DO n = 0, nnodes
-            rk3rhs = rk3rhs + utild(n,j)*Ain(n,j)*DGDmat(k,n)*wghts(n) 
+			HOLDER(n) = utild(n,j)*Ain(n,j)*DGDmat(k,n)*wghts(n)
         END DO
+		rk3rhs = SUM(HOLDER)
 
-            IF(k == nnodes) THEN
-                IF(j .eq. num_elem) THEN ! At the right hand boundary, need to use periodicity to compare j and j+1 elements
-                    rk3rhs = rk3rhs - GFlux(utild(k,j),Ain(k,j),Ain(0,1))*Ain(k,j)
-                ELSE
-                    rk3rhs = rk3rhs - GFlux(utild(k,j),Ain(k,j),Ain(0,j+1))*Ain(k,j) 
-                END IF
-            END IF 
-    
-            IF(k == 0) THEN
-                IF(j==1) THEN ! At left hand boundary, need to use periodicity to compare j-1 and j elements
-                    rk3rhs = rk3rhs + GFlux(utild(k,j), Ain(nnodes,num_elem), Ain(k,j))*Ain(k,j)
-                ELSE
-                    rk3rhs = rk3rhs + GFlux(utild(k,j), Ain(nnodes,j-1), Ain(k,j))*Ain(k,j)
-                END IF
-            END IF
-
-            rk3rhs = rk3rhs*(2D0/(wghts(k)*elemdx))
+		! -- Fluxes
+		IF(k .eq. nnodes) THEN
+			rk3rhs = rk3rhs - Gflux(Ain,j,j+1,utild,nnodes,num_elem) 
+		END IF
+		IF(k .eq. 0) THEN
+			rk3rhs = rk3rhs + Gflux(Ain,j-1,j,utild,nnodes,num_elem) 
+		END IF
+           
+        rk3rhs = rk3rhs*(2D0/(wghts(k)*elemdx))
 
         END FUNCTION rk3rhs
 
