@@ -3,8 +3,8 @@
 % By: Devin Light
 % ----
 
-nx = 15;
-ny = 15;
+nx = 25;
+ny = 25;
 
 % X-grid
 % ---

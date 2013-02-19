@@ -20,7 +20,7 @@ program execute
   transient2 = .false.
   transient3 = .false.
 
-  call test2dweno(1,25,25,2,3,0.d0,0.d0,20,0.5d0)
+  call test2dweno(99,24,24,2,3,0.d0,0.d0,20,0.5d0)
 
   transient = .true.
  ! call test2dweno(6,33,33,2,4,0.d0,0.d0,20,0.5d0)
@@ -53,11 +53,6 @@ contains
     integer :: npad, tmp_method(27)
     integer :: nx, ny, nstep, i ,j , n, p, ierr, nout, imethod, ncheck, n1, n2, nn
 
-    integer :: num_elem,nnodes ! Dev: Parameters used for DG/PPM method
-    real(kind=8):: elemdx
-    real(kind=8), allocatable, dimension(:) :: ecent, DGxgrid, DGnodes,DGwghts
-    REAL(KIND=8), allocatable, dimension(:,:) :: DGu, DGutilde,DGCmat,DGDmat, DGCmatINV
-
     real (kind=8) :: dt, tfinal, pi, &
          tmp_time, tmp_umax, tmp_vmax, cnvg1, cnvg2, cnvgi, &
          tmp_qmin, tmp_qmax
@@ -68,7 +63,14 @@ contains
     real(kind=4) :: t0,tf
     character(len=8) :: outdir
 
-    pi = atan2(0.d0,-1.d0)
+	! DG variables
+	INTEGER :: num_elem, nnodes
+	REAL(KIND=8) :: elemdx
+    REAL(KIND=8), allocatable, dimension(:) :: DG_ecent, DG_nodes,DG_wghts,DG_x
+    REAL(KIND=8), allocatable, dimension(:,:) :: DG_u, DG_q, DG_util,DG_C,DG_D, DG_CINV,DG_rhoq,DG_rhop
+
+
+    pi = DACOS(-1D0)
 
     if(nlev.lt.1) STOP 'nlev should be at least 1 in test2dweno'
 
@@ -80,7 +82,7 @@ contains
     tmp_method(5) = 38 ! PPM, selective and positivity limiting using PMOD
     tmp_method(6) = 99 ! PPM/DG Hybrid, no limiting
 
-    do nn = 6,n2
+    do nn = 1,n2,n2-1
        imethod = tmp_method(nn)
 
       
@@ -195,12 +197,12 @@ contains
           nmethod = 82
           nmethod2 = 82
         case(99) ! Dev: nmethod = 99 will be the case of DG/PPM hybridization
-          write(*,*) 'PPM/DG Hybrid, no limiting, N=4'
+          write(*,*) 'PPM/DG Hybrid, no limiting, N=5'
           write(*,*) 'WARNING: Should only be used with periodic BCs'
-          outdir = 'ppmdg/'
+          outdir = 'ppmdghy/'
           nmethod = 99
           nmethod2 = 1
-          nnodes = 4
+          nnodes = 5
           write(*,*) 'Number of GLL nodes=',nnodes+1
        end select
 
@@ -218,11 +220,11 @@ contains
     ! For DG: Compute GLL nodes in [-1,1] + weights for quadratures, and fill in the entries of the D-matrix
     ! (only needs to be done once)
 
-    allocate(DGDmat(0:nnodes,0:nnodes),DGnodes(0:nnodes), DGwghts(0:nnodes),STAT=ierr)
+    allocate(DG_D(0:nnodes,0:nnodes),DG_nodes(0:nnodes), DG_wghts(0:nnodes),STAT=ierr)
     if(nmethod .eq. 99) THEN
-        CALL gllnewton(nnodes,DGnodes)
-        CALL weights(nnodes,DGnodes, DGwghts)
-        CALL Dmat(nnodes, DGnodes, DGDmat)
+        CALL gllnewton(nnodes,DG_nodes)
+        CALL weights(nnodes,DG_nodes, DG_wghts)
+        CALL Dmat(nnodes, DG_nodes, DG_D)
     end if
     
 
@@ -232,9 +234,9 @@ contains
 
        nx = nx0*nscale**(p-1)
        ny = ny0*nscale**(p-1)
-                                   ! Dev: When using DG, each element in x-direction will have nnodes+1 DG-nodes (overlap at edges).
-       num_elem = (nx)/(nnodes+1)  ! For the matrix C (used in exchanging between DG/PPM to be square (for inverse), nx must be 
-       elemdx = 1.d0/num_elem      ! a multiple of nnodes+1 (say, if nnodes=4, nx = 20)
+                                        ! Dev: When using DG, each element in x-direction will have nnodes+1 GLL-nodes (overlap at edges).
+       num_elem = INT((nx)/(nnodes+1))  ! For the matrix C (used in exchanging between DG/PPM) to be nonsingular, nx must be 
+       elemdx = 1.d0/num_elem           ! a multiple of nnodes+1 (say, if nnodes=4, nx = 25)
 
        allocate(q(1-npad:nx+npad,1-npad:ny+npad), &
             q0(1:nx,1:ny),dqdt(1:nx,1:ny),jcbn(1:nx,1:ny), &
@@ -246,13 +248,12 @@ contains
             xlambda(0:nx,1:ny),xmonlimit(0:nx,1:ny), &
             ylambda(1:nx,0:ny),ymonlimit(1:nx,0:ny), &
             STAT=ierr)
-       allocate(DGu(1:nx,1:ny),DGutilde(1:nx,1:ny), DGxgrid(1:nx), STAT=ierr)
-       allocate(DGCmat(0:nnodes,0:nnodes),DGCmatINV(0:nnodes,0:nnodes),&
-               ecent(1:num_elem),STAT=ierr)
+       allocate(DG_u(1:nx,1:ny),DG_util(1:nx,1:ny), DG_x(1:nx), DG_q(1:nx,1:ny), DG_rhoq(1:nx,1:ny),DG_rhop(1:nx,1:ny),STAT=ierr)
+       allocate(DG_C(0:nnodes,0:nnodes),DG_CINV(0:nnodes,0:nnodes), DG_ecent(1:num_elem),STAT=ierr)
 
        
-       DGu(:,:) = 0.D0
-       DGutilde(:,:) = 0.D0
+       DG_u(:,:) = 0.D0
+       DG_util(:,:) = 0.D0
        
        
 
@@ -278,24 +279,22 @@ contains
        !--------------------------
 
        if(nmethod.eq.99) then
-         ecent(1) = 0.5d0*elemdx
+         DG_ecent(1) = 0.5d0*elemdx
          do i = 2,num_elem
-            ecent(i)=ecent(i-1)+elemdx
+            DG_ecent(i)=DG_ecent(i-1)+elemdx
+         end do
+
+        ! Transfer nodes to physical domain
+		! Note: The coordinates of the edges of each element are repeated
+         do i = 1,num_elem
+            DG_x(1+(i-1)*(nnodes+1):i*(nnodes+1)) = DG_ecent(i)+0.5d0*elemdx*DG_nodes(0:nnodes)
          end do
 
         ! Fill in values in C-matrix
         ! C and C^(-1) are used in transferring information between DG/PPM grids
 
-        CALL Cmat(nnodes, DGnodes, DGwghts, dx(1), elemdx, DGCmat) ! Note that C assumes an evenly spaced PPM grid
-        CALL GEPP_INV(DGCmat,nnodes+1,DGCmatINV)
-        
-
-        ! Transfer nodes to physical domain
-		! Note: The coordinates of the edges of each element are repeated
-         do i = 1,num_elem
-            DGxgrid(1+(nnodes+1)*(i-1):(nnodes+1)*i) = ecent(i)+0.5d0*elemdx*DGnodes(0:nnodes)
-         end do
-
+        CALL Cmat(nnodes, DG_nodes, DG_wghts, dx(1), elemdx, DG_C) ! Note that C assumes an evenly spaced PPM grid
+        CALL GEPP_INV(DG_C,nnodes+1,DG_CINV)
        end if
 
        ! set up y grid
@@ -327,8 +326,8 @@ contains
        dqdt = 0.d0
        call init2d(ntest,nx,ny,q0,u,v,u2,v2,x,xf,y,yf,tfinal,cdf_out)
 
-       IF(nmethod .eq. 99) THEN ! Initialize velocity field at DG nodes
-           CALL DGuvel(DGu,DGxgrid,y,nx,ny,ntest)   
+       IF(nmethod .eq. 99) THEN ! Initialize velocity and q fields at DG grid
+			CALL DGinit2d(ntest,DG_x,y,nx,ny,DG_q,DG_u)
        END IF
 
        q(1:nx,1:ny) = q0
@@ -390,7 +389,7 @@ contains
           jcbn(:,j) = dx*dy(j)
           utilde(:,j) = u(:,j)*dy(j)                    ! Dev: Scales so that utilde = u*dy
           u2tilde(:,j) = u2(:,j)*dy(j)
-          DGutilde(:,j) = DGu(:,j)*dy(j)
+          DG_util(:,j) = DG_u(:,j)
        end do
        do i = 1,nx
           vtilde(i,:) = v(i,:)*dx(i)                    ! Dev: Scales so that vtilde = v*dx
@@ -401,6 +400,8 @@ contains
        rho(1:nx,1:ny) = jcbn(1:nx,1:ny)                 ! Dev: Scales so that rho = rho*dx*dy ; 
        rhoq(1:nx,1:ny) = rho(1:nx,1:ny)*q(1:nx,1:ny)    ! (note that physical rho == 1, so rho = jac = dx*dy = rho*dx*dy)
        rhoprime(1:nx,1:ny) = rho(1:nx,1:ny)             ! rhov = rho*v*dx ; rhou = rho*u*dy
+	   DG_rhop(1:nx,1:ny) = rho(1:nx,1:ny)
+	   DG_rhoq(1:nx,1:ny) = rho(1:nx,1:ny)*DG_q(1:nx,1:ny)
 
        tmp_qmin = MINVAL(q(1:nx,1:ny))
        tmp_qmax = MAXVAL(q(1:nx,1:ny))
@@ -416,6 +417,8 @@ contains
           rho(1:nx,1:ny) = jcbn(1:nx,1:ny)
           rhoq(1:nx,1:ny) = rho(1:nx,1:ny)*q(1:nx,1:ny) ! DEVIN: rhoq = rho*q
           rhoprime(1:nx,1:ny) = rho(1:nx,1:ny)          ! rhoprime = rho to begin
+		  DG_rhop(1:nx,1:ny) = rho(1:nx,1:ny)
+		  DG_rhoq(1:nx,1:ny) = rho(1:nx,1:ny)*DG_q(1:nx,1:ny)
 
 !!$          rho(1:nx,1:ny) = rhoprime(1:nx,1:ny)
 !!$          if(dowenounsplit) then
@@ -426,12 +429,13 @@ contains
 !!$             ylambda = 0.d0
 !!$             ymonlimit = 0
 !!$          else
-        ! NOTE: CALLING SKAMSTEP
              call skamstep_2d(q,dqdt,utilde,vtilde,u2tilde,v2tilde, &
                   rho,rhoq,rhoprime,nx,ny,npad,dt,jcbn,&
                   xlambda,xmonlimit,ylambda,ymonlimit,& 
-                  DGutilde,num_elem, elemdx,nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts, DGDmat)
+                  DG_util,num_elem, elemdx,nnodes,DG_nodes,DG_wghts, DG_D,&
+				  DG_rhoq, DG_rhop, DG_q,DG_ecent,x)
 !!$          end if
+
           time = time + dt
 
           if ((mod(n,nstep/nout).eq.0).OR.(n.eq.nstep)) then
@@ -454,11 +458,11 @@ contains
                   time,1,cdf_out,p)
           end if
 
-          write(*,*) 'rho min, max = ', MINVAL(rho), MAXVAL(rho)
-          write(*,*) 'rhoprime min, max = ', MINVAL(rhoprime), MAXVAL(rhoprime)
-          write(*,*) 'rhoq min, max = ', MINVAL(rhoq), MAXVAL(rhoq)
-          write(*,*) 'q min, max = ', MINVAL(q(1:nx,1:ny)), MAXVAL(q(1:nx,1:ny))
-          write(*,*)
+!          write(*,*) 'rho min, max = ', MINVAL(rho), MAXVAL(rho)
+!          write(*,*) 'rhoprime min, max = ', MINVAL(rhoprime), MAXVAL(rhoprime)
+!          write(*,*) 'rhoq min, max = ', MINVAL(rhoq), MAXVAL(rhoq)
+!          write(*,*) 'q min, max = ', MINVAL(q(1:nx,1:ny)), MAXVAL(q(1:nx,1:ny))
+!          write(*,*)
 
 !!$          if(n.eq.3)     stop ' in back_traj'
 
@@ -501,11 +505,13 @@ contains
        deallocate(q,q0,dqdt,u,v,utilde,vtilde,u2,v2,u2tilde,v2tilde, &
             uout,vout,jcbn,dx,x,xf,dy,y,yf,rho,rhoprime,rhoq,&
             xlambda,xmonlimit,ylambda,ymonlimit,STAT=ierr)
-       deallocate(DGu,DGutilde,ecent, DGxgrid, DGCmat, DGCmatINV, STAT=ierr)
+       deallocate(DG_u,DG_util,DG_x, DG_q, STAT=ierr)
+       deallocate(DG_C,DG_CINV,DG_ecent,STAT=ierr)
+
 
 
     end do
-    deallocate(DGnodes,DGwghts,DGDmat, STAT=ierr)
+    deallocate(DG_nodes,DG_wghts,DG_D, STAT=ierr)
  end do
 
 990    format(2i6,3e12.4,3f5.2,3e12.4,f8.2,i8)
@@ -531,7 +537,7 @@ contains
     real(kind=8), dimension(1:nx,1:ny) :: r
     real(kind=8), dimension(0:nx,0:ny) :: psi, psi2
 
-    pi = datan2(0.d0,-1.d0)
+    pi = DACOS(-1D0)
 
     psi(:,:) = 0.d0
     psi2(:,:) = 0.d0
@@ -794,15 +800,70 @@ contains
     if(ntest.eq.17) tfinal = 15.d0
 
   end subroutine init2d
+
+  ! Initialize DG arrays DGu and DGq on DG grid
+  SUBROUTINE DGinit2d(ntest,x,y,nx,ny,DGq,DGu)
+	IMPLICIT NONE
+	INTEGER, INTENT(IN) :: nx,ny,ntest
+	REAL(KIND=8), DIMENSION(1:nx,1:ny),INTENT(OUT) :: DGq,DGu
+	REAL(KIND=8), DIMENSION(1:nx), INTENT(IN) :: x
+	REAL(KIND=8), DIMENSION(1:ny), INTENT(IN) :: y
+	REAL(KIND=8), DIMENSION(1:nx,1:ny) :: psi
+	REAL(KIND=8) :: PI
+	INTEGER :: i,j
+
+	PI = DACOS(-1D0)
+
+    SELECT CASE(ntest)
+		CASE(1:2) 
+		! Uniform flow: u=v=1, no t dependence
+		DO j=1,ny
+			DO i=1,nx
+				psi(i,j) = -x(i) + y(j)
+			END DO
+		END DO
+		CASE(5:6,9)
+		! LeVeque (1996) Deformation
+		DO j=1,ny
+			DO i=1,nx
+				psi(i,j) = (1D0/PI)*(DSIN(PI*x(i))**2)*(DSIN(PI*y(j))**2)
+			END DO
+		END DO
+		CASE(99)
+		! Uniform flow: u=1,v=0, no t dependence
+		DO j=1,ny
+			DO i=1,nx
+				psi(i,j) = y(j)
+			END DO
+		END DO
+	END SELECT
+
+	! Compute u velocities from stream function
+	DO j = 2,ny
+		DGu(:,j) = (psi(:,j) - psi(:,j-1))/(y(j) - y(j-1))
+	END DO
+	! For the first row, use forward divided difference to stay within domain
+	DGu(:,1) = (psi(:,2) - psi(:,1))/(y(2) - y(1))
+
+	! Initialize scalar field
+	SELECT CASE(ntest)
+		CASE(99)
+		  do j = 1,ny
+          	DGq(:,j) = sin(2.d0*pi*x)*sin(2.d0*pi*y(j))
+          end do
+	END SELECT
+	
+  END SUBROUTINE DGinit2d
   
   subroutine skamstep_2d(q,dqdt,u0,v0,u2,v2,rho_in,rhoq,rhoprime,nx,ny,npad,dt,jcbn,&
-            xlambda,xmonlimit,ylambda,ymonlimit, DGu,num_elem,elemdx,nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+            xlambda,xmonlimit,ylambda,ymonlimit, DG_u,num_elem,elemdx,nnodes,DG_nodes,DG_wghts,DG_D, &
+			DG_rhoq,DG_rhop,DG_q,DG_ecent,xplt)
     !  use forward-in-time Skamarock (2006) scheme
 
     implicit none
 
-    integer, intent(in) :: nx, ny, npad,num_elem,nnodes
-    real (kind=8), intent(in)  :: dt,elemdx
+    integer, intent(in) :: nx, ny, npad
+    real (kind=8), intent(in)  :: dt
 
     real (kind=8), dimension(1-npad:nx+npad,1-npad:ny+npad), intent(inout) :: q
     real (kind=8), dimension(1:nx,1:ny), intent(in) :: dqdt ! extra tendency
@@ -811,17 +872,13 @@ contains
     real (kind=8), dimension(1:nx,1:ny), intent(in) :: jcbn
     real (kind=8), dimension(0:nx,1:ny), intent(out) :: xlambda,xmonlimit
     real (kind=8), dimension(1:nx,0:ny), intent(out) :: ylambda,ymonlimit
-    REAL(KIND=8), DIMENSION(1:nx,1:ny), INTENT(IN) :: DGu ! u velocities at DG nodes at current time
-    REAL(KIND=8), DIMENSION(0:nnodes,0:nnodes), INTENT(IN):: DGCmat, DGCmatINV,DGDmat
-    REAL(KIND=8), DIMENSION(0:nnodes), INTENT(IN) :: DGnodes,DGwghts
-
 
     ! local variables, two-dimensional arrays
     real (kind=8), dimension(1:nx,1:ny), intent(in) :: rho_in
     real (kind=8), dimension(1:nx,1:ny), intent(inout) :: rhoq,rhoprime
     real (kind=8), dimension(0:nx,1:ny) :: u, uh
     real (kind=8), dimension(1:nx,0:ny) :: v, vh
-    REAL(KIND=8), DIMENSION(1:nx,1:ny) :: DGuh ! u velocities at DG nodes half time step
+
 
 !bloss    integer, parameter :: nmaxcfl = 20
 
@@ -839,7 +896,6 @@ contains
     real (kind=8), dimension(-2:nx+2) :: rhouh1d
     real (kind=8), dimension(1-npad-nmaxcfl:nx+npad+nmaxcfl) :: rho1dx
     real (kind=8), dimension(1-npad-nmaxcfl:nx+npad+nmaxcfl) :: rhoprime1dx
-    REAL(KIND=8), DIMENSION(1:nx) :: DGu1dx,DGrhou1dx
     
 
     ! local variables, one-dimensional arrays in y-direction
@@ -859,6 +915,19 @@ contains
 
     real(kind=8), external :: tfcn
     real(kind=8) :: t_temp, tmpflx(0:ny), tmplam(0:ny), tmpmon(0:ny)
+
+	! DG parameters
+	INTEGER, INTENT(IN) :: num_elem,nnodes
+	REAL(KIND=8), DIMENSION(1:nx,1:ny), INTENT(INOUT) :: DG_rhoq,DG_rhop,DG_q
+    REAL(KIND=8), DIMENSION(1:nx,1:ny) :: DG_uh ! u velocities at DG nodes half time step
+    REAL(KIND=8), DIMENSION(1:nx,1:ny), INTENT(IN) :: DG_u ! u velocities at DG nodes at current time
+    REAL(KIND=8), DIMENSION(0:nnodes,0:nnodes), INTENT(IN):: DG_D
+    REAL(KIND=8), DIMENSION(0:nnodes), INTENT(IN) :: DG_nodes,DG_wghts
+	REAL(KIND=8), INTENT(IN) :: elemdx
+	REAL(KIND=8), DIMENSION(1:num_elem), INTENT(IN) :: DG_ecent
+	REAL(KIND=8), DIMENSION(1:nx) :: DG_rhoq1dx,DG_rhop1dx,xplt
+    REAL(KIND=8), DIMENSION(1:nx) :: DG_u1dx
+
 
     ! set up boundary types, fluxes, limiting flags
     if(nofluxew) then
@@ -884,14 +953,14 @@ contains
     uh = u0
     vh = v0
     IF(nmethod .eq. 99) THEN
-        DGuh = DGu
+        DG_uh = DG_u
     END IF
 
     if(transient) then
        uh = uh*tfcn(t_temp)
        vh = vh*tfcn(t_temp)
        IF(nmethod .eq. 99) THEN 
-           DGuh = DGuh*tfcn(t_temp) ! u velocities at mid-timestep at DG nodes
+           DG_uh = DG_uh*tfcn(t_temp) ! u velocities at mid-timestep at DG nodes
        END IF
     end if
 
@@ -969,8 +1038,11 @@ contains
        do j = 1,ny
           q1dx(1:nx)     = q(1:nx,j)
           rhoq1dx(1:nx)  = rhoq(1:nx,j)
-          DGu1dx(1:nx) = DGuh(1:nx,j)
-
+          IF(nmethod .eq. 99) THEN
+		   DG_u1dx(1:nx) = DG_uh(1:nx,j)
+		   DG_rhoq1dx(1:nx) = DG_rhoq(1:nx,j)
+	 	   DG_rhop1dx(1:nx) = DG_rhop(1:nx,j)
+		  END IF
           rhoprime1dx(1:nx) = rhoprime(1:nx,j)
 
           if(nofluxew) then
@@ -1016,12 +1088,17 @@ contains
                        dopcm, dowenosplit, &
                        scale,nmethod,lambdamax,epslambda, &
                        xlambda(0,j),xmonlimit(0,j), &
-                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+                       DG_rhoq1dx,DG_rhop1dx,DG_u1dx,num_elem,elemdx,nnodes,DG_nodes,DG_wghts,DG_D,DG_ecent,xplt)
 
           ! update solution
           q(1:nx,j) = rhoq1dx(1:nx)/rhoprime1dx(1:nx)
           rhoprime(1:nx,j) = rhoprime1dx(1:nx)
           rhoq(1:nx,j) = rhoq1dx(1:nx)
+		  IF(nmethod .eq. 99) THEN
+!		   DG_rhoq(1:nx,j) = DG_rhoq1dx(1:nx)
+!		   DG_rhop(1:nx,j) = DG_rhop1dx(1:nx)
+		   DG_q(1:nx,j) = DG_rhoq1dx(1:nx)/DG_rhop1dx(1:nx)
+		  END IF
 
        end do
 
@@ -1069,21 +1146,21 @@ contains
           rho1dy(1-npadrho:ny+npadrho) = rho(i,1-npadrho:ny+npadrho)
           rhovh1d(-2:ny+2) = rhovh(i,-2:ny+2)
 
-          call ppmwrap(rhoq1dy,q1dy,rhovh1d,rho1dy,rhoprime1dy,tmpflx,dt, &
-                       ny,npad,nmaxcfl,ybctype,fybc, &
-                       dosemilagr,dosellimit,domonlimit,doposlimit, &
-                       dopcm, dowenosplit, &
-                       scale,nmethod2,lambdamax,epslambda,tmplam, tmpmon, &
-                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+!          call ppmwrap(rhoq1dy,q1dy,rhovh1d,rho1dy,rhoprime1dy,tmpflx,dt, &
+!                       ny,npad,nmaxcfl,ybctype,fybc, &
+!                       dosemilagr,dosellimit,domonlimit,doposlimit, &
+!                       dopcm, dowenosplit, &
+!                       scale,nmethod2,lambdamax,epslambda,tmplam, tmpmon, &
+!                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
 
           yflx(i,:) = tmpflx(:)
           ylambda(i,:) = tmplam(:)
           ymonlimit(i,:) = tmpmon(:)
 
           ! update solution
-          q(i,1:ny) = rhoq1dy(1:ny)/rhoprime1dy(1:ny)
-          rhoprime(i,1:ny) = rhoprime1dy(1:ny)
-          rhoq(i,1:ny) = rhoq1dy(1:ny)
+!          q(i,1:ny) = rhoq1dy(1:ny)/rhoprime1dy(1:ny)
+!          rhoprime(i,1:ny) = rhoprime1dy(1:ny)
+!          rhoq(i,1:ny) = rhoq1dy(1:ny)
 
        end do
 
@@ -1133,21 +1210,21 @@ contains
           rho1dy(1-npadrho:ny+npadrho) = rho(i,1-npadrho:ny+npadrho)
           rhovh1d(-2:ny+2) = rhovh(i,-2:ny+2)
 
-          call ppmwrap(rhoq1dy,q1dy,rhovh1d,rho1dy,rhoprime1dy,tmpflx,dt, &
-                       ny,npad,nmaxcfl,ybctype,fybc, &
-                       dosemilagr,dosellimit,domonlimit,doposlimit, &
-                       dopcm, dowenosplit, &
-                       scale,nmethod2,lambdamax,epslambda,tmplam, tmpmon, &
-                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+!          call ppmwrap(rhoq1dy,q1dy,rhovh1d,rho1dy,rhoprime1dy,tmpflx,dt, &
+!                       ny,npad,nmaxcfl,ybctype,fybc, &
+!                       dosemilagr,dosellimit,domonlimit,doposlimit, &
+!                       dopcm, dowenosplit, &
+!                       scale,nmethod2,lambdamax,epslambda,tmplam, tmpmon, &
+!                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
 
           yflx(i,:) = tmpflx(:)
           ylambda(i,:) = tmplam(:)
           ymonlimit(i,:) = tmpmon(:)
 
           ! update solution
-          q(i,1:ny) = rhoq1dy(1:ny)/rhoprime1dy(1:ny)
-          rhoprime(i,1:ny) = rhoprime1dy(1:ny)
-          rhoq(i,1:ny) = rhoq1dy(1:ny)
+!          q(i,1:ny) = rhoq1dy(1:ny)/rhoprime1dy(1:ny)
+!          rhoprime(i,1:ny) = rhoprime1dy(1:ny)
+!          rhoq(i,1:ny) = rhoq1dy(1:ny)
 
        end do
 
@@ -1155,6 +1232,12 @@ contains
        do j = 1,ny
           q1dx(1:nx)     = q(1:nx,j)
           rhoq1dx(1:nx)  = rhoq(1:nx,j)
+
+          IF(nmethod .eq. 99) THEN
+		   DG_u1dx(1:nx) = DG_uh(1:nx,j)
+		   DG_rhoq1dx(1:nx) = DG_rhoq(1:nx,j)
+	 	   DG_rhop1dx(1:nx) = DG_rhop(1:nx,j)
+		  END IF
 
           rhoprime1dx(1:nx) = rhoprime(1:nx,j)
 
@@ -1201,12 +1284,18 @@ contains
                        dopcm, dowenosplit, &
                        scale,nmethod,lambdamax,epslambda, &
                        xlambda(0,j),xmonlimit(0,j), &
-                       DGu1dx, num_elem,elemdx, nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+                       DG_rhoq1dx,DG_rhop1dx,DG_u1dx,num_elem,elemdx,nnodes,DG_nodes,DG_wghts,DG_D,DG_ecent,xplt)
 
           ! update solution
           q(1:nx,j) = rhoq1dx(1:nx)/rhoprime1dx(1:nx)
           rhoprime(1:nx,j) = rhoprime1dx(1:nx)
           rhoq(1:nx,j) = rhoq1dx(1:nx)
+
+		  IF(nmethod .eq. 99) THEN
+!		   DG_rhoq(1:nx,j) = DG_rhoq1dx(1:nx)
+!		   DG_rhop(1:nx,j) = DG_rhop1dx(1:nx)
+		   DG_q(1:nx,j) = DG_rhoq1dx(1:nx)/DG_rhop1dx(1:nx)
+		  END IF
 
        end do
 

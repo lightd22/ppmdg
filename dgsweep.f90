@@ -3,7 +3,7 @@
 ! By: Devin Light
 ! --------------------------------------------------------------------
 
-SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,DGCmatINV,DGDmat,npad2,dt)
+SUBROUTINE DGSWEEP(rhoq,rhop,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGDmat,dt,pltg,ecent,rhoqout,rhopout)
 
     USE DGmod ! Contains useful functions, parameters, and subroutines
     
@@ -14,13 +14,19 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
     ! ---
     ! Inputs
     ! ---
-    INTEGER, INTENT(IN) :: num_elem,N,npad2, nnodes
+    INTEGER, INTENT(IN) :: num_elem,N,nnodes
     REAL(KIND=DOUBLE), INTENT(IN) :: elemdx,dt
+	REAL(KIND=DOUBLE), DIMENSION(1:num_elem) :: ecent
     REAL(KIND=DOUBLE), DIMENSION(1:N), INTENT(IN) :: u
-    REAL(KIND=DOUBLE), DIMENSION(0:N+1), INTENT(INOUT) :: rhoq
-    REAL(KIND=DOUBLE), DIMENSION(1-npad2:N+npad2), INTENT(INOUT) :: rhoprime
-    REAL(KIND=DOUBLE), DIMENSION(0:nnodes,0:nnodes), INTENT(IN) :: DGCmat, DGCmatINV,DGDmat
+    REAL(KIND=DOUBLE), DIMENSION(1:N), INTENT(INOUT) :: rhoq
+    REAL(KIND=DOUBLE), DIMENSION(1:N), INTENT(INOUT) :: rhop
+    REAL(KIND=DOUBLE), DIMENSION(0:nnodes,0:nnodes), INTENT(IN) :: DGDmat
     REAL(KIND=DOUBLE), DIMENSION(0:nnodes), INTENT(IN) :: nodes, wghts
+	REAL(KIND=DOUBLE), DIMENSION(1:N), INTENT(IN) :: pltg ! coordinates of plotting grid (first nnodes+1 are first element, etc)
+	! ---
+	! Outputs
+	! ---
+	REAL(KIND=DOUBLE), DIMENSION(1:N), INTENT(OUT) :: rhopout,rhoqout ! output on plotting array
     
     ! ---
     ! Local variables
@@ -32,35 +38,40 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
     REAL(KIND=DOUBLE) :: PI
 	REAL(KIND=DOUBLE), DIMENSION(0:nnodes) :: HOLDER1,HOLDER2
 
+
     PI = DACOS(-1D0)
     HOLDER1 = 0D0
     HOLDER2 = 0D0
     
     ! ########################################
     ! A(k,j) gives a_k(t) in the jth element for rhoq 
-    ! B(k,j) gives a_k(t) in the jth element for rhoprime
+    ! B(k,j) gives a_k(t) in the jth element for rhop
     ! ########################################
 
-    ! Reform incoming values to be more convienent
+    ! Reform incoming nodal values to be more convienent
     DO j=1,num_elem
         rqBAR(:,j) = rhoq(1+(nnodes+1)*(j-1) : (nnodes+1)*j)
-        rpBAR(:,j) = rhoprime(1+(nnodes+1)*(j-1) : (nnodes+1)*j)
+        rpBAR(:,j) = rhop(1+(nnodes+1)*(j-1) : (nnodes+1)*j)
         utild(:,j) = u(1+(nnodes+1)*(j-1) : (nnodes+1)*j)
     END DO
 
     ! Values incoming assumed to be cell averages, invert with CmatINV which gives coefficents a_k(t) for SUM(a_k*phi_k), which
     ! when averaged over evenly spaced subcells in each element, give the incoming values
     ! Use these values to initialize the A and B matricies via C^(-1)
-    DO j=1,num_elem
-        DO i=0,nnodes
-            DO k = 0,nnodes
-                HOLDER1(k) = DGCmatINV(i,k)*rqBAR(k,j)
-                HOLDER2(k) = DGCmatINV(i,k)*rpBAR(k,j)
-            END DO
-            A(i,j) = SUM(HOLDER1)
-            B(i,j) = SUM(HOLDER2)
-        END DO
-    END DO
+!    DO j=1,num_elem
+!        DO i=0,nnodes
+!            DO k = 0,nnodes
+!                HOLDER1(k) = DGCmatINV(i,k)*rqBAR(k,j)
+!                HOLDER2(k) = DGCmatINV(i,k)*rpBAR(k,j)
+!            END DO
+!            A(i,j) = SUM(HOLDER1)
+!            B(i,j) = SUM(HOLDER2)
+!        END DO
+!    END DO
+
+	! Note: for right now, we are only going to do DG method (ie not hybrid)
+	A(:,1:num_elem) = rqBAR(:,1:num_elem)
+	B(:,1:num_elem) = rpBAR(:,1:num_elem)
 
 	! -- Enforce periodicity
 	A(:,0) = A(:,num_elem)
@@ -83,7 +94,7 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
 	! -- Enforce periodicity
     A1(:,0) = A1(:,num_elem)
 	A1(:,num_elem+1) = A1(:,1)
-	B1(:,0) = B1(:,num_elem) !Ain,utild,k,j,nnodes,num_elem,DGDmat,elemdx,nodes,wghts
+	B1(:,0) = B1(:,num_elem) 
 	B1(:,num_elem+1) = B1(:,1)
 
     DO j = 1, num_elem
@@ -107,27 +118,41 @@ SUBROUTINE DGSWEEP(rhoq,rhoprime,num_elem,elemdx,nnodes,nodes,wghts,u,N,DGCmat,D
 
     ! After time stepping is complete, use Cmat to re-average the series expansion to get back to cell-averaged values
     ! on the evenly spaced grid to send back for PPM
-    HOLDER1 = 0D0
-    HOLDER2 = 0D0
-    DO j = 1,num_elem
-        DO i=0,nnodes    
-            DO k=0,nnodes
-                HOLDER1(k) = DGCmat(i,k)*A(k,j)
-                HOLDER2(k) = DGCmat(i,k)*B(k,j)
-            END DO
-            rqBAR(i,j) = SUM(HOLDER1)
-            rpBAR(i,j) = SUM(HOLDER2)
-        END DO
-    END DO
+!    HOLDER1 = 0D0
+!    HOLDER2 = 0D0
+!    DO j = 1,num_elem
+!        DO i=0,nnodes    
+!            DO k=0,nnodes
+!                HOLDER1(k) = DGCmat(i,k)*A(k,j)
+!                HOLDER2(k) = DGCmat(i,k)*B(k,j)
+!            END DO
+!            rqBAR(i,j) = SUM(HOLDER1)
+!            rpBAR(i,j) = SUM(HOLDER2)
+!       END DO
+!    END DO
     
     ! Reform original rp and rq vectors to send back
 	! -- Note: There are 2 ghost cells (one at each end) that we dont update
+	! Right now, these contain the DG coefficents (read: nodal values)
     DO j=1,num_elem
-        rhoq(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = rqBAR(:,j)
-        rhoprime(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = rpBAR(:,j)
+        rhoq(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = A(:,j)!rqBAR(:,j)
+        rhop(1+(nnodes+1)*(j-1) : (nnodes+1)*j) = B(:,j) !rpBAR(:,j)
     END DO
     
-    
+	! Evaluate DG solution at plotting grid
+	HOLDER1 = 0D0
+	HOLDER2 = 0D0
+	DO j=1,num_elem
+		DO i=1,nnodes+1
+			DO k=0,nnodes
+				HOLDER1(k) = A(k,j)*phi((2D0/elemdx)*(pltg(i+(j-1)*(nnodes+1))-ecent(j)),k,nnodes,nodes)
+				HOLDER2(k) = B(k,j)*phi((2D0/elemdx)*(pltg(i+(j-1)*(nnodes+1))-ecent(j)),k,nnodes,nodes)
+			END DO
+			rhoqout(i+(j-1)*(nnodes+1)) = SUM(HOLDER1)
+			rhopout(i+(j-1)*(nnodes+1)) = SUM(HOLDER2)
+		END DO
+	END DO
+
     CONTAINS
 
 	REAL(KIND=DOUBLE) FUNCTION Gflux(A,jleft,jright,u,nnodes,nelems)

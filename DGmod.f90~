@@ -169,43 +169,26 @@ MODULE DGmod
             REAL(KIND=DOUBLE), DIMENSION(0:N), INTENT(IN) :: nodes, wghts
             REAL(KIND=DOUBLE), DIMENSION(0:N,0:N), INTENT(OUT) :: output
             REAL(KIND=DOUBLE), INTENT(IN) :: dx,dxelem
-            INTEGER :: m,j,k
-            REAL(KIND=DOUBLE) :: HOLDER,dz,x
+            INTEGER :: i,k,m
+            REAL(KIND=DOUBLE) :: dz,xi
+			REAL(KIND=DOUBLE), DIMENSION(0:N) :: HOLDER
+
+			HOLDER = 0D0
 
             dz = (2D0*dx)/(dxelem)
  
             HOLDER = 0.D0
-            DO m=0,N
-                DO j=0,N
-                    HOLDER = 0D0
-                    DO k=0,N
-                        x = dz*(m+(nodes(k)+1)/2D0)-1D0
-                        HOLDER = HOLDER + wghts(k)*phi(x,j,N,nodes)
+            DO i=0,N
+                DO k=0,N
+                    DO m=0,N
+                        xi = dz*(i+0.5D0*(nodes(m)+1))-1D0
+                        HOLDER(m) = wghts(m)*phi(xi,k,N,nodes)
                     END DO
-                    output(m,j) = HOLDER/2D0
+                    output(i,k) = SUM(HOLDER)*0.5D0
                 END DO
             END DO
 
         END SUBROUTINE Cmat
-
-    ! ########################################################################
-    ! p4(x) computes the 4th order Legendre polynomial value 
-    ! at x. dp4(x) compute the derivatives of these polys at x
-    ! ########################################################################
-        REAL FUNCTION p4(x)
-            IMPLICIT NONE
-            REAL(KIND = DOUBLE), INTENT(IN) :: x
-            
-            p4 = (35*x**4 - 30*x**2 + 3)/8
-        END FUNCTION p4
-
-        REAL FUNCTION dp4(x)
-            IMPLICIT NONE
-            REAL(KIND = DOUBLE), INTENT(IN) :: x
-        
-            dp4 = (35*x**3 - 15*x)/2
-
-        END FUNCTION dp4
 
     ! ###########################################################
     ! phi computes the k'th basis function, a Lagrange interpolating
@@ -255,18 +238,20 @@ MODULE DGmod
 
         END SUBROUTINE Dmat
 
-        REAL(KIND = DOUBLE) FUNCTION phitld(x,N,nodes,j,Ain)
+        REAL(KIND = DOUBLE) FUNCTION phitld(x,N,nodes,j,Ain,nelems)
             REAL(KIND = DOUBLE), INTENT(IN) :: x
-            INTEGER, INTENT(IN) :: j, N
-            REAL(KIND = DOUBLE), DIMENSION(0:,1:), INTENT(IN) :: Ain
+            INTEGER, INTENT(IN) :: j, N,nelems
+            REAL(KIND=DOUBLE), DIMENSION(0:N,0:nelems+1), INTENT(IN) :: Ain
             REAL(KIND=DOUBLE), DIMENSION(0:N), INTENT(IN) :: nodes
+			REAL(KIND=DOUBLE), DIMENSION(0:N) :: HOLDER
             INTEGER :: i
 
             phitld = 0D0
 
             DO i = 0, N
-                 phitld = phitld + Ain(i,j)*phi(x,i,N,nodes)
+                 HOLDER(i) = Ain(i,j)*phi(x,i,N,nodes)
             END DO
+			phitld = SUM(HOLDER)
 
         END FUNCTION phitld
 
@@ -317,6 +302,7 @@ MODULE DGmod
             u(:,1) = (psi(:,2) - psi(:,1))/(y(2) - y(1))
 
         END SUBROUTINE DGuvel
+
 
         SUBROUTINE GEPP_INV (M,N,Minv)
         !

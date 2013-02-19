@@ -2,7 +2,7 @@ subroutine ppmwrap(rhoq,q,rhou,rho,rhop,flx,dt, &
      N,npad,nmaxcfl,bctype,fbc, &
      dosemilagr,doselect,domonotonic,dopositive,dopcm,doweno, &
      scale,nmethod,lambdamax,epslambda,lambda,monlimit, &
-     DGu, num_elem,elemdx,nnodes,DGCmat,DGCmatINV,DGnodes,DGwghts,DGDmat)
+     DG_rhoq,DG_rhop,DG_u,num_elem,elemdx,nnodes,DG_nodes,DG_wghts,DG_D,DG_ecent,pltg)
 
   implicit none
 
@@ -38,9 +38,13 @@ subroutine ppmwrap(rhoq,q,rhou,rho,rhop,flx,dt, &
   ! DG Parameters
   INTEGER, INTENT(IN) :: num_elem,nnodes
   REAL(KIND=8), INTENT(IN) :: elemdx
-  REAL(KIND=8), DIMENSION(0:nnodes) :: DGnodes, DGwghts
-  REAL(KIND=8), DIMENSION(0:nnodes,0:nnodes), INTENT(IN) :: DGCmat, DGCmatINV,DGDmat
-  REAL(KIND=8), DIMENSION(1:N), INTENT(IN) :: DGu
+  REAL(KIND=8), DIMENSION(0:nnodes), INTENT(IN) :: DG_nodes, DG_wghts
+  REAL(KIND=8), DIMENSION(0:nnodes,0:nnodes), INTENT(IN) ::DG_D
+  REAL(KIND=8), DIMENSION(1:N), INTENT(IN) :: DG_u
+  REAL(KIND=8), DIMENSION(1:N), INTENT(IN) :: pltg
+  REAL(KIND=8), DIMENSION(1:N), INTENT(INOUT) :: DG_rhoq, DG_rhop
+  REAL(KIND=8), DIMENSION(1:num_elem), INTENT(IN) :: DG_ecent
+  REAL(KIND=8), DIMENSION(1:N) :: rhoqout, rhopout
 
 
   nselpad = 0
@@ -109,7 +113,11 @@ subroutine ppmwrap(rhoq,q,rhou,rho,rhop,flx,dt, &
              lambda(:) = 0.
              monlimit(:) = 0.
      case(99) ! PPM/DG Hybrid, no limiting, ADDED BY DEVIN
-        CALL dgsweep(rhoq,rhop,num_elem,elemdx,nnodes,DGnodes,DGwghts,DGu,N,DGCmat,DGCmatINV,DGDmat,npad2,dt)
+		! The inputs here are the DGrhoq and DGrhop nodal values which will be updated via SSPRK3, then evaluated at the evenly spaced grid
+		! and stored as rhoq and rhop, which are used for computing q on the plotting grid
+        CALL dgsweep(DG_rhoq,DG_rhop,num_elem,elemdx,nnodes,DG_nodes,DG_wghts,DG_u,N,DG_D,dt,pltg,DG_ecent,rhoqout,rhopout) 
+		rhoq(1:N) = rhoqout(1:N)
+		rhop(1:N) = rhopout(1:N)
      case default
         write(*,*) 'nmethod = ', nmethod
         STOP 'in ppmwrap.f90: no CFL<1 method with this nmethod'
