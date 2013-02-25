@@ -10,14 +10,14 @@ tests = {'adv_sine', ... % Uniform adv of sine^4
          'def_cosinebell', ... % LeVeque deformation test cosinebell
          'def_smooth_cosinebell', ... % Smoother version of LeVeque test
          };
-res = {'1','2','3'};
+res = {'1','2','3','4','5'};
 
-which_test = tests(1);
-which_res = res(1);
+which_test = tests(3);
+which_res = res(3);
 
 
 ncfilename = strcat('weno2d_' ,which_test{1}, '.nc');
-for n=1:2
+for n=1:3
     if n==1
         methname = 'PPM, No Limiting';
         nc = ['pfctnon/' ncfilename];
@@ -28,6 +28,11 @@ for n=1:2
         nc = ['ppmdghy/', ncfilename];
         file = ['figures/ppmdg' which_test{1}];
         [Q2,x2,y2,t2] = plot_2dadv(methname,nc,which_res,file);
+    elseif n==3
+        methname = 'DG, nolimiting';
+        nc = ['dgnolim/', ncfilename];
+        file = ['figures/dg' which_test{1}];
+        [Q3,x3,y3,t3] = plot_2dadv(methname,nc,which_res,file);
     end
     
 end
@@ -35,7 +40,7 @@ end
 % Make combined animation
 % ---
 
-
+%{
 scrsz = get(0,'ScreenSize');
 figure('Position',[1 scrsz(4)/2 scrsz(3) scrsz(4)/2])
 subplot(1,2,1)
@@ -79,4 +84,4 @@ end
 
 % Create animated GIF
 imwrite(mov, map, 'combo.gif', 'DelayTime', 0, 'LoopCount', inf);
-
+%}
